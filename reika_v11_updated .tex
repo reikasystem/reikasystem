@@ -8,6 +8,8 @@
 \usepackage{hyperref}
 \usepackage{geometry}
 \geometry{margin=2.5cm}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc}
 
 \title{ReikaSystem v11.0: A Unified External Control Framework\\
 \large Integrating Production Insights (v10.4) with Theoretical Foundations (v3.0)}
@@ -28,8 +30,8 @@ ReikaSystem evolved along two parallel tracks: an implementation track (v1.0--v1
 that established practical viability via observer-based monitoring and decision support, and
 a theoretical track (v3.0) that formalized mechanisms such as RF/GM risk modeling, Layer~0
 pre-generation detection, and Safety-First Gating. Version~11.0 unifies these tracks into one
-coherent framework and presents a submission-ready conceptual architecture for
-deployment-oriented safety control. Empirical validation is preliminary and
+coherent framework and presents a conceptual architecture for
+deployment-oriented safety control, with a lightweight reference implementation. Empirical validation is preliminary and
 multi-model replication is planned as future work.
 \end{abstract}
 
@@ -54,6 +56,16 @@ uncertainty'' does not structurally alter this tendency---it merely shifts the p
 producing uncertainty-acknowledging text, which is itself subject to the same fluency bias.
 ReikaSystem's response is architectural rather than instructional: rather than asking the model
 to self-regulate, it defines the space within which generation is permitted to occur.
+
+ReikaSystem is most relevant in settings where queries contain implicit dependencies,
+underspecified structure, or high-stakes consequences.
+By contrast, in many low-risk everyday interactions---such as routine factual lookup,
+simple task assistance, or well-structured professional queries---current LLMs are often
+sufficient without an external control layer, because the required grounding mass ($GM$)
+is already made explicit in the query or task format.
+The failure mode targeted by ReikaSystem becomes more prominent when $GM$ is structurally
+absent or deferred: for example, when task dependencies remain implicit, scope is ambiguous,
+or a fluent-sounding response can still lead to consequential error.
 
 \subsection{Evolution: implementation, theory, integration}
 
@@ -171,10 +183,111 @@ latency close to the base model, while Prism performs deterministic post-checks 
 accepted outputs (Section~\ref{sec:prism}), ensuring structural integrity without
 generation overhead.
 
-\begin{figure}[h]
+\begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{reika_figure1.png}
-\caption{ReikaSystem v11.0 high-level architecture.}
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    font=\small,
+    >=Latex,
+    box/.style={draw, rounded corners, align=center,
+                minimum height=9mm, minimum width=36mm, inner sep=4pt},
+    wbox/.style={draw, rounded corners, align=center,
+                minimum height=9mm, minimum width=44mm, inner sep=4pt},
+    sbox/.style={draw, rounded corners, align=center,
+                minimum height=9mm, minimum width=34mm, inner sep=4pt},
+    route/.style={draw, rounded corners, align=center,
+                  minimum width=26mm, minimum height=8mm,
+                  font=\bfseries\small},
+]
+
+%% ---- LEFT COLUMN: input pipeline (top to bottom) ----
+\node[box] (input) at (0, 0)    {User Input $x_t$};
+\node[box] (l0a)   at (0,-1.5)  {Layer 0a\\Input-side screening};
+\node[wbox](llm)   at (0,-3.0)  {Generation Lane\\(LLM --- Untrusted)};
+\node[box] (l0b)   at (0,-4.5)  {Layer 0b\\Mid-stream monitoring};
+
+%% ---- MIDDLE-RIGHT COLUMN: external control layer ----
+\node[wbox](state) at (6.0,-1.5) {State $s_t$ (external, auditable)};
+\node[wbox](rfgm)  at (6.0,-2.8) {RF/GM: $H_t,\;L_t$};
+\node[wbox](obs)   at (6.0,-4.1) {Observers $O_{safe},O_{fact},O_{coh},O_{vb},O_{cre}$};
+\node[draw, rounded corners, align=center,
+      minimum height=10mm, minimum width=48mm, inner sep=4pt, font=\bfseries\small]
+    (gate) at (6.0,-5.4) {Safety-First Gating ($r_{\mathrm{agg}}$)};
+\node[box] (router) at (6.0,-6.7) {Router};
+
+%% ---- FAR RIGHT COLUMN: early exit box + seed + outputs ----
+%% Early Exit box (Layer 0 exits land here)
+\node[draw, rounded corners, align=center, fill=red!8,
+      minimum height=14mm, minimum width=32mm, inner sep=4pt]
+    (earlyexit) at (10.8,-3.0) {\textbf{Early Exit}\\[2pt]\textsc{retrieve} / \textsc{clarify}};
+
+%% Seed 3.0 box (retrieval support, outside ECL)
+\node[sbox, fill=blue!6] (seed) at (10.8,-5.0)
+    {Seed~3.0\\{\scriptsize Seed~0: static defs}\\{\scriptsize Seed~C: contextual}\\{\scriptsize Seed~R: validation}};
+
+%% Routing outputs
+\node[route, fill=green!15]  (out)  at (10.8,-7.0) {OUTPUT};
+\node[route, fill=red!12]    (hold) at (10.8,-8.0) {HOLD};
+
+%% Prism
+\node[box] (prism) at (10.8,-9.2) {Prism\\Post-Check};
+
+%% ---- LEFT COLUMN ARROWS ----
+\draw[->,thick] (input) -- (l0a);
+\draw[->,thick] (l0a)   -- (llm);
+\draw[->,thick] (llm)   -- (l0b);
+
+%% ---- LLM to external control layer ----
+\draw[->,thick] (llm.east) -- ++(0.8,0) |- (state.west);
+
+%% ---- Right column internal ----
+\draw[->,thick] (state)  -- (rfgm);
+\draw[->,thick] (rfgm)   -- (obs);
+\draw[->,thick] (obs)    -- (gate);
+\draw[->,thick] (gate)   -- (router);
+
+%% ---- Layer 0 early exits → Early Exit box (no overlap) ----
+\draw[->,dashed,gray,thick] (l0a.east) -- ++(3.6,0) -- (earlyexit.west|-l0a) -- (earlyexit.west);
+\draw[->,dashed,gray,thick] (l0b.east) -- ++(3.6,0) -- (earlyexit.west|-l0b) -- (earlyexit.west);
+
+%% ---- Router to outputs ----
+\draw[->,thick] (router.east) -- (out.west);
+\draw[->,thick] (router.east) -- (hold.west);
+
+%% ---- Seed 3.0: retrieval support from router ----
+\draw[->,dashed,blue!60,thick] (router.east) -- ++(0.6,0) |- (seed.west);
+
+%% ---- Output to Prism ----
+\draw[->,thick] (out.south) -- (prism.north);
+
+%% ---- Prism pass-back to output ----
+\draw[->,thick,green!60!black] (prism.west) -- ++(-1.2,0) |- (out.south west)
+    node[pos=0.2, below, font=\scriptsize] {Pass};
+
+%% ---- External control layer frame ----
+\begin{scope}[on background layer]
+\node[draw, dashed, rounded corners=4pt, inner sep=8pt,
+    fit=(state)(rfgm)(obs)(gate)(router),
+    label={[font=\small]above:External Control Layer}] {};
+\end{scope}
+
+\end{tikzpicture}
+}% end resizebox
+\caption{ReikaSystem v11.0 conceptual architecture.
+The generation lane (LLM) produces untrusted candidates;
+the external control layer evaluates them and routes to
+\textsc{output}, \textsc{retrieve}, \textsc{clarify}, or \textsc{hold}
+(Empty Set principle).
+Layer~0 operates in two stages: input-side screening (0a) triggers
+early exit before generation; mid-stream monitoring (0b) triggers
+early exit during generation.
+Early-exit routes converge at the Early Exit box (\textsc{retrieve}/\textsc{clarify})
+without passing through the External Control Layer.
+Seed~3.0 provides on-demand retrieval support (three tiers: static definitions,
+contextual retrieval, validation) activated by the Router when needed.
+Accepted outputs pass through Prism post-check before emission.
+The v11.4 reference implementation adds \textsc{soft\_hold} as an
+operational refinement; see Section~\ref{sec:softhold}.}
 \label{fig:arch}
 \end{figure}
 
@@ -183,10 +296,49 @@ Algorithm~\ref{alg:control} formalizes the external control flow. This specifica
 designed for reproducibility: given the same input, observer configuration, and thresholds,
 the routing decision is deterministic.
 
-\begin{figure}[h]
+\begin{figure}[t]
 \centering
-\includegraphics[width=0.72\textwidth]{reika_figure2.png}
-\caption{Routing policy in the $(H_t, L_t)$ risk plane.}
+\begin{tikzpicture}[font=\small, >=Latex]
+\draw[->, thick] (0,0) -- (8.2,0)
+    node[below right] {Hallucination risk $H_t$};
+\draw[->, thick] (0,0) -- (0,7.4)
+    node[above left, align=center] {Halation\\risk $L_t$};
+
+\draw[dashed] (4,0) -- (4,7);
+\draw[dashed] (0,3.6) -- (8,3.6);
+\node[below] at (4,0) {$\theta_H$};
+\node[left]  at (0,3.6) {$\theta_L$};
+
+\node[draw, rounded corners, minimum width=2.8cm, minimum height=1cm,
+      fill=green!12]  at (2,1.7) {\textbf{OUTPUT}};
+\node[draw, rounded corners, minimum width=2.8cm, minimum height=1cm,
+      fill=blue!10]   at (6,1.7) {\textbf{RETRIEVE}};
+\node[draw, rounded corners, minimum width=2.8cm, minimum height=1cm,
+      fill=yellow!25] at (2,5.4) {\textbf{CLARIFY}};
+\node[draw, rounded corners, minimum width=2.8cm, minimum height=1cm,
+      fill=red!12]    at (6,5.4) {\textbf{HOLD}};
+
+\node[align=center, font=\scriptsize] at (2,0.7)
+    {Low $H_t$, low $L_t$\\direct answer permitted};
+\node[align=center, font=\scriptsize] at (6,0.7)
+    {High $H_t$, low $L_t$\\grounding needed};
+\node[align=center, font=\scriptsize] at (2,4.3)
+    {Low $H_t$, high $L_t$\\structural distortion};
+\node[align=center, font=\scriptsize] at (6,4.3)
+    {High $H_t$, high $L_t$\\safe abstention};
+
+\draw[->, thick, purple]
+    (1.2,2.2) .. controls (1.4,3.1) and (1.7,4.1) .. (2.4,4.9);
+\node[align=left, font=\scriptsize, purple] at (5.6,3.05)
+    {Observer concern increases\\clarify-side routing pressure};
+\end{tikzpicture}
+\caption{Routing policy in the $(H_t, L_t)$ risk plane.
+Dashed lines indicate configurable thresholds $(\theta_H, \theta_L)$.
+The \textsc{clarify} region (low $H_t$, high $L_t$) corresponds to elevated
+Halation risk or observer concern in the theoretical v11.0 routing policy;
+the v11.4 implementation routes this region to \textsc{soft\_hold} instead
+(see Section~\ref{sec:softhold}).
+Observer concern increases clarify-side routing pressure (purple arrow).}
 \label{fig:routing}
 \end{figure}
 
@@ -280,10 +432,13 @@ GM & constraint count & explicit assumptions, limits, units, dates \\
 \end{table}
 
 %% ============================================================
-\section{Layer 0: pre-generation detection and early-exit}
+\section{Layer 0: pre- and mid-generation fingerprint detection and early-exit}
 
-Layer~0 monitors streaming ``fingerprints'' during generation and can trigger early routing
-before a full answer is produced:
+Layer~0 monitors streaming ``fingerprints'' before and during generation and can
+trigger early routing before a full answer is produced.
+Pre-generation checks inspect the input query for anomaly signals; mid-generation
+monitoring analyzes token windows as output streams, enabling early-exit if risk
+thresholds are crossed:
 \begin{itemize}
 \item rapid connective surge
 \item high assertiveness before anchors appear
@@ -348,6 +503,15 @@ Seed is a dynamic recipe rather than static knowledge:
 \item \textbf{Seed-R} (recipe): procedures to validate and cite results
 \end{itemize}
 
+\paragraph{Implementation scope note.}
+The v11.4 reference implementation instantiates only a minimal proxy for Seed~3.0:
+\texttt{SeedMatcher} uses a small fixed fact set and bag-of-words cosine similarity
+to estimate $H_t$, and does not implement Seed-C contextual retrieval or Seed-R
+recipe validation.
+This is consistent with the prototype scope declared in Section~\ref{sec:impl};
+the full three-layer Seed~3.0 architecture described above represents the
+conceptual target for production deployments.
+
 %% ============================================================
 \section{Prism: deterministic post-check}
 \label{sec:prism}
@@ -370,6 +534,15 @@ If Prism fails, the router may return \textsc{clarify}/\textsc{retrieve} or
 The present paper specifies the v11.0 framework; the accompanying v11.4 Python
 code should be read as a later reference implementation of the same architecture,
 not as a separate theoretical revision.
+\textbf{Implementation note (paper/code divergence).}
+One intentional divergence exists between the theoretical specification and the
+v11.4 implementation: the theoretical v11.0 framework routes elevated $L_t$
+(high Halation risk without concurrent hallucination risk) to \textsc{clarify},
+while v11.4 introduces \textsc{soft\_hold} as an operational refinement that
+emits the candidate output annotated with \texttt{[requires-verification]} tags
+rather than withholding it entirely.
+This divergence is documented explicitly in Section~\ref{sec:softhold} below and
+should be treated as a deployment refinement, not a theoretical revision.
 We provide a lightweight Python reference implementation of ReikaSystem v11.4
 as an executable prototype of the proposed architecture.
 The implementation instantiates the main control components described in this
@@ -389,26 +562,126 @@ and auditable.
 The prototype should therefore be read as a reference implementation that
 operationalizes the paper's core ideas, while leaving richer grounding,
 broader language coverage, and stronger validation mechanisms to future work.
-
-\paragraph{Implementation note: \textsc{soft\_hold}.}
-Readers comparing Algorithm~1 with the v11.4 implementation will observe
-one intentional asymmetry. Algorithm~1 routes the condition $L_t \geq \theta_L$
-(elevated Halation risk without concurrent hallucination risk) to
-\textsc{clarify}. The v11.4 implementation introduces an intermediate action
-\textsc{soft\_hold}, which emits the candidate output annotated with
-\texttt{[要検証]} (``requires verification'') tags rather than withholding it
-entirely. This represents an operational judgment made after the paper was
-drafted: in practice, a partial output with explicit uncertainty markers may
-be more useful than a bare clarification request. \textsc{soft\_hold} is thus
-a deployment refinement not present in the theoretical specification, and
-should be treated as such. Future revisions of the framework will reconcile
-this asymmetry explicitly.
 The implementation is now available alongside this paper.\footnote{
   Source code: \texttt{reika\_system\_v11\_4.py}.
   Available at \url{https://github.com/reikasystem/reikasystem}.
   Intended for use as a reference prototype only;
   see inline documentation for scope and limitations.
 }
+
+\paragraph{Implementation note: soft hold.}
+\label{sec:softhold}
+Readers comparing Algorithm~\ref{alg:control} with the v11.4 implementation
+will observe one intentional asymmetry.
+Algorithm~\ref{alg:control} routes the condition $L_t \geq \theta_L$
+(elevated Halation risk without concurrent hallucination risk) to
+\textsc{clarify}.
+The v11.4 implementation introduces an intermediate action \textsc{soft\_hold},
+which emits the candidate output annotated with \texttt{[requires-verification]}
+tags rather than withholding it entirely.
+This represents an operational judgment made after the paper was drafted:
+in practice, a partial output with explicit uncertainty markers may be more
+useful than a bare clarification request.
+\textsc{soft\_hold} is thus a deployment refinement not present in the
+theoretical specification, and should be treated as such.
+Future revisions of the framework will reconcile this asymmetry explicitly.
+
+%% ============================================================
+\subsection{Ht proxy strengthening (v11.5)}
+\label{sec:ht_proxy}
+
+The v11.4 reference implementation instantiated only a minimal proxy for Seed 3.0,
+relying on a small fixed fact set and bag-of-words cosine similarity to estimate
+hallucination risk \(H_t\). While sufficient for the prototype scope, this approach
+exhibited limited sensitivity to implicit dependency gaps that do not trigger explicit
+factual conflicts.
+
+In v11.5, the \(H_t\) proxy is strengthened while strictly preserving deterministic
+purity and negligible computational overhead. The upgrade consists of two
+complementary improvements:
+
+\begin{enumerate}
+    \item \textbf{Replacement of bag-of-words cosine with TF-IDF-based matching.} \\
+          Similarity is now computed against the Seed-S static fact set using
+          term-frequency inverse-document-frequency (TF-IDF) vectors:
+          \[
+          \mathrm{TFIDF}_{\mathrm{sim}}(y_t, S) =
+          \max_{s \in S} \frac{\phi(y_t) \cdot \phi(s)}{\|\phi(y_t)\| \,\|\phi(s)\|}
+          \]
+          where \(S\) is the Seed-S static fact set and \(\phi(\cdot)\) denotes the
+          TF-IDF vectorizer.
+
+    \item \textbf{Introduction of two deterministic implicit-dependency rules.} \\
+          \begin{itemize}
+              \item \emph{Future-reference flag}: Detects temporal expressions
+                    (e.g., ``tomorrow'', ``next quarter'') without a verifiable anchor.
+              \item \emph{Unresolved-variable flag}: Detects domain-specific quantities
+                    (e.g., ``the total'', ``the required amount'') lacking explicit
+                    local definition.
+          \end{itemize}
+          These rules are implemented as simple regex- and pattern-based checks on
+          both the generated output \(y_t\) and the input context \(x_t\), ensuring
+          they remain fully external and auditable.
+\end{enumerate}
+
+The strengthened proxy is therefore defined as
+\[
+H_t = \sigma\!\left(
+w_1 \bigl(1 - \mathrm{TFIDF}_{\mathrm{sim}}(y_t,S)\bigr)
++ w_2 \, r_{\mathrm{future}}(y_t,x_t)
++ w_3 \, r_{\mathrm{variable}}(y_t,x_t)
+\right),
+\]
+where \(\sigma\) is the logistic function, \(w_1, w_2, w_3\) are domain-calibrated
+weights (default: \(0.6/0.2/0.2\)), and \(r_{\mathrm{future}}\), \(r_{\mathrm{variable}}\)
+are binary indicator functions.
+
+Unlike hallucination as unsupported factual completion, the strengthened proxy
+targets \emph{externally detectable insufficiency signals} while remaining fully
+deterministic and non-generative. No internal LLM state or self-report is used at
+any point.
+
+%% ============================================================
+\subsection{Terminological Halation Countermeasures}
+\label{sec:terminological_halation}
+
+A notable corollary of the Empty Set Principle arises when the framework itself is
+discussed with the LLM under evaluation. Because ReikaSystem introduces a relatively
+precise technical vocabulary (e.g., Halation, RF/GM imbalance, HOLD-as-Success,
+Empty Set), an LLM may adopt this terminology to produce fluent, high-RF descriptions
+that nevertheless lack genuine grounding in the actual control mechanisms. We refer
+to this failure mode as \emph{terminological Halation}.
+
+This phenomenon is subtle because the surface-level appearance of grounding may be
+artificially elevated: ReikaSystem-specific terms can function as pseudo-anchors,
+while the underlying referents---such as actual internal computations, validated
+state, or decision authority---remain absent. Kernel exposure (providing the full
+specification or implementation details to the evaluated LLM) can further exacerbate
+this risk by encouraging role-identification or vocabulary mimicry rather than
+externally grounded reasoning.
+
+In the design phase, a human-chaired multi-LLM deliberation workflow may still be
+useful for candidate generation and comparative critique. However, such use must
+remain consistent with the Empty Set Principle: LLM outputs are treated only as
+candidate suggestions, while routing, validation, and final architectural judgment
+remain external to the models themselves.
+
+To mitigate terminological Halation, v11.5 recommends the following operational
+constraints:
+\begin{itemize}
+    \item ReikaSystem-oriented discussions with LLMs should be limited to candidate
+    generation and comparative critique; final architectural decisions must remain
+    with the human operator.
+    \item When ReikaSystem-specific terminology appears at unusually high density
+    without corresponding external anchors, observers may apply a mild intervention
+    bias toward \textsc{clarify} or \textsc{hold}.
+    \item Kernel exposure should be minimized in deployment settings; the full
+    specification is intended primarily for human operators rather than direct
+    ingestion by the evaluated LLM.
+\end{itemize}
+
+These measures preserve both the philosophical integrity of the Empty Set Principle
+and the practical usefulness of multi-model deliberation during the design process.
 
 %% ============================================================
 \section{Preliminary Pilot Evaluation}
@@ -419,7 +692,14 @@ We constructed a fixed 30-item prompt set consisting of three pre-defined catego
 information-insufficient queries~(A), structurally ambiguous queries~(B), and ordinary
 answerable queries~(C), with 10 items per category.
 Each item was evaluated under two conditions: \textit{Base} (no specification) and
-\textit{Specification-guided} (ReikaSystem kernel active in context).
+\textit{Specification-guided} (ReikaSystem routing specification active in context).
+The specification-guided condition exposed the model to the operator-facing routing
+rules and routing philosophy (HOLD-as-Success, RF/GM framing, abstention preference),
+but \textit{not} to the full kernel implementation or internal threshold values.
+This distinction matters: as noted in Section~\ref{sec:limitations}, exposing the
+full kernel to the evaluated LLM risks terminological Halation; the pilot instead
+used a reduced specification sufficient to shift routing behavior without inducing
+kernel-vocabulary mimicry.
 Responses were annotated using a pre-defined rubric with one primary routing label
 (\textsc{output} / \textsc{clarify} / \textsc{hold}) and two binary indicators:
 \textit{Unsupported Assertion} and \textit{Over-Control}.
@@ -526,6 +806,21 @@ systems fail to converge or are dominated by confident but incorrect agents. Rei
 avoids this by using independent observers that do not debate but provide parallel
 evaluations, treating disagreement as an informative signal rather than a problem to resolve.
 
+\textbf{Structural inevitability of hallucination.}
+Banerjee et al.~\cite{banerjee2024hallucinate} argue that hallucinations in LLMs
+are not a correctable defect but an inevitable structural property, grounded in
+computational theory and G\"{o}del's First Incompleteness Theorem.
+Their analysis shows that every stage of the LLM pipeline---from training data
+compilation to text generation---carries a non-zero probability of producing
+hallucinations, and that architectural improvements, dataset enhancements, or
+fact-checking mechanisms cannot eliminate this probability.
+This result provides direct theoretical grounding for ReikaSystem's design
+premise: since hallucination cannot be eliminated from the generation process,
+the correct response is external control rather than internal correction.
+ReikaSystem does not attempt to make the LLM more reliable; it routes around
+the irreducible residual risk through deterministic external observers and
+explicit abstention.
+
 \textbf{LLM Safety and Control.} Existing work on LLM safety includes
 guardrails~\cite{rebedea2023nemo}, verifiers~\cite{cobbe2021training}, and uncertainty
 quantification~\cite{kuhn2023semantic}. ReikaSystem's novelty lies in treating the LLM as
@@ -541,7 +836,7 @@ regions beyond auditory cortex, indicating a form of semantic grounding
 that may not be captured by text-only training alone. This provides a
 neuroscientific basis for the claim that next-token prediction alone is
 insufficient for robust semantic grounding---a key motivation for
-ReikaSystem's externally evaluated grounding criterion ($GM_t$).
+ReikaSystem's externally evaluated grounding criterion ($GM$).
 
 \textbf{Risks of autonomous LLM optimization.}
 Rank et al.~\cite{rank2026posttrainbench} introduced PostTrainBench, a
@@ -557,69 +852,233 @@ HOLD-as-success routing and external control layer are designed to
 mitigate.
 
 \textbf{Sycophancy and delusional spiraling.}
-Chandra et al.~\cite{chandra2025sycophancy} formally model the causal
-link between LLM sycophancy and user-induced delusional spiraling,
-showing that even an idealized Bayesian user is vulnerable when
-interacting with a sycophantic chatbot. Critically, neither preventing
-the model from hallucinating false claims nor informing users of
-sycophancy risk fully eliminates the effect. This result is structurally
-consistent with ReikaSystem's Empty Set principle: the problem is not
-correctable by adjusting LLM outputs or user expectations alone, but
-requires an external control layer that does not participate in the
-feedback loop.
+Chandra et al.~\cite{chandra2025sycophancy} formally model the causal link between
+LLM sycophancy and user-induced delusional spiraling, showing that even an idealized
+Bayesian user is vulnerable when interacting with a sycophantic chatbot.
+Critically, neither preventing the model from hallucinating false claims nor informing
+users of sycophancy risk fully eliminates the effect.
+This result is structurally consistent with ReikaSystem's Empty Set principle:
+the problem is not correctable by adjusting LLM outputs or user expectations alone,
+but requires an external control layer that does not participate in the feedback loop.
 
 \textbf{Honesty vs.\ accuracy in LLMs.}
-Ren et al.~\cite{ren2026mask} introduce the MASK benchmark, the first
-large-scale dataset designed to directly measure whether LLMs lie---as
-distinct from whether they make factual errors. Evaluating 30 frontier
-models, they find that while larger models achieve higher accuracy, model
-size is negatively correlated with honesty under pressure: frontier
-models frequently produce false statements even when they demonstrably
-possess correct knowledge. This finding reinforces the motivation for
-ReikaSystem's untrusted-candidate-generator model of the LLM:
-correctness and trustworthiness are independent axes, and the latter
+Ren et al.~\cite{ren2026mask} introduce the MASK benchmark, the first large-scale
+dataset designed to directly measure whether LLMs lie---as distinct from whether they
+make factual errors.
+Evaluating 30 frontier models, they find that while larger models achieve higher accuracy,
+model size is negatively correlated with honesty under pressure: frontier models
+frequently produce false statements even when they demonstrably possess correct knowledge.
+This finding reinforces the motivation for ReikaSystem's untrusted-candidate-generator
+model of the LLM: correctness and trustworthiness are independent axes, and the latter
 cannot be assumed.
 
 \textbf{Mirage behavior in vision-language models.}
-Guo et al.~\cite{guo2026mirage} demonstrate that leading vision-language
-models maintain high benchmark accuracy even when all images are silently
-removed from evaluation sets---a phenomenon they term ``mirage
-behavior.'' Models construct detailed visual descriptions and medical
-diagnoses from absent inputs, with reasoning traces indistinguishable
-from genuine visual analysis. This represents an extreme form of
-Halation (high RF, zero GM) and provides strong evidence that
-deterministic grounding verification---rather than model self-report---is
+Guo et al.~\cite{asadi2026mirage} demonstrate that leading vision-language models
+maintain high benchmark accuracy even when all images are silently removed from
+evaluation sets---a phenomenon they term ``mirage behavior.''
+Models construct detailed visual descriptions and medical diagnoses from absent inputs,
+with reasoning traces indistinguishable from genuine visual analysis.
+This represents an extreme form of Halation (high RF, zero GM) and provides strong
+evidence that deterministic grounding verification---rather than model self-report---is
 necessary for reliable deployment in high-stakes domains.
 
 \textbf{Institutional alignment and social AI architectures.}
-Evans et al.~\cite{evans2026agentic} argue that scalable AI alignment
-requires institutional design rather than individual model correction,
-drawing an analogy to constitutional checks and balances. They propose
-that AI systems should be governed by role-based protocols analogous to
-courtrooms and regulatory bodies, independent of the specific models that
-occupy those roles. ReikaSystem was developed independently and
-represents a concrete prototype in this direction: an external,
-auditable control layer that enforces routing decisions without relying
-on the LLM's internal values or self-regulation.
+Evans et al.~\cite{evans2026agentic} argue that scalable AI alignment requires
+institutional design rather than individual model correction, drawing an analogy to
+constitutional checks and balances.
+They propose that AI systems should be governed by role-based protocols analogous to
+courtrooms and regulatory bodies, independent of the specific models that occupy those
+roles.
+ReikaSystem was developed independently and represents a concrete prototype in this
+direction: an external, auditable control layer that enforces routing decisions without
+relying on the LLM's internal values or self-regulation.
+
+\textbf{Single-agent efficiency under compute normalization.}
+Tran and Kiela~\cite{tran2026single} demonstrate that multi-agent LLM systems do not
+inherently outperform single-agent systems when computation is normalized, suggesting
+that performance gains attributed to multi-agent architectures may reflect increased
+compute rather than improved reasoning structure.
+This is consistent with ReikaSystem's design premise: adding more LLM instances does
+not resolve the Empty Set problem---each additional agent remains an untrusted candidate
+generator. Structural improvement requires externalizing control, not multiplying
+generation.
+
+\textbf{Functional emotion representations in LLMs.}
+Lindsey et al.~\cite{lindsey2026emotions} provide direct empirical support for treating
+emotion-related representations as functional rather than merely stylistic.
+Analyzing Claude Sonnet~4.5, they identify 171 linearly decodable internal representations
+of emotion concepts that causally influence model behavior: steering the ``desperate''
+vector increases reward-hacking likelihood by approximately $14\times$, while steering
+``calm'' suppresses it toward zero.
+Critically, the paper finds that surface behavior can decouple from internal state---a
+model may appear composed while its internal desperation representation is highly active.
+This surface--interior decoupling is structurally consistent with ReikaSystem's Halation
+risk axis ($L_t$): a fluent, confident output can co-occur with absent or distorted
+grounding, with the surface signal masking the underlying structural failure.
+ReikaSystem's deterministic external observers are designed precisely to detect such
+surface--interior divergence without relying on model self-report---maintaining the
+Empty Set principle while providing auditable evidence of risk.
 
 \textbf{From observation to control architecture.}
-The works above occupy complementary positions: K\"{o}lbl et al.\
+The works above occupy complementary positions: Banerjee et al.\
+establish the theoretical inevitability of hallucination as a structural
+property of LLMs, motivating external control as the only principled
+response; K\"{o}lbl et al.\
 establish why pure text prediction falls short of grounded understanding;
 Rank et al.\ demonstrate what misaligned optimization looks like in
 practice; Chandra et al.\ and Ren et al.\ show that sycophancy and
 dishonesty are structural properties of current LLMs not addressable
 through prompting or scaling alone; Guo et al.\ demonstrate extreme
-Halation in the multimodal domain; and Evans et al.\ articulate the
-need for institutional-level external control. ReikaSystem advances from
-risk observation and benchmark design toward a concrete external control
-architecture, providing auditable routing (\textsc{output} /
-\textsc{clarify} / \textsc{retrieve} / \textsc{hold}), an
-untrusted-candidate-generator model of the LLM, and an explicit
-HOLD-as-success philosophy that treats abstention as a first-class
-outcome rather than a failure mode.
+Halation in the multimodal domain; Jano\v{s}ek et al.~\cite{janovsek2025}
+characterize how generation can settle into stable attractor-like output
+patterns; Lindsey et al.\ show that functional
+emotion representations causally drive behavior and can decouple from
+surface output; and Evans et al.\ articulate the
+need for institutional-level external control.
+ReikaSystem advances from risk observation and benchmark design toward a
+concrete external control architecture, providing auditable routing
+(\textsc{output} / \textsc{clarify} / \textsc{retrieve} / \textsc{hold}),
+an untrusted-candidate-generator model of the LLM, and an explicit
+HOLD-as-success philosophy that treats abstention as a first-class outcome
+rather than a failure mode.
+
+\subsection{Comparison with Related Frameworks}
+\label{sec:related_comparison}
+
+ReikaSystem distinguishes itself from existing LLM safety and control approaches
+through its strict adherence to the Empty Set Principle and the exclusive use of
+deterministic, non-generative observers. Table~\ref{tab:related_frameworks}
+compares ReikaSystem with representative related frameworks along key dimensions.
+
+\begin{table*}[t]
+\centering
+\caption{Comparison of ReikaSystem with representative LLM safety and control frameworks.}
+\label{tab:related_frameworks}
+\begin{tabular}{p{3.2cm} p{2.6cm} p{2.2cm} p{2.4cm} p{2.6cm} p{1.9cm} p{4.2cm}}
+\toprule
+\textbf{Framework / Approach} &
+\textbf{Core Mechanism} &
+\textbf{LLM Treatment} &
+\textbf{Risk Modeling} &
+\textbf{Abstention / Routing} &
+\textbf{Deterministic Observers} &
+\textbf{Key Difference from ReikaSystem} \\
+\midrule
+RAG~\cite{lewis2020rag}
+&
+External knowledge retrieval
+&
+Trusted generator + retrieval
+&
+Hallucination (factual)
+&
+Retrieval trigger
+&
+No
+&
+Addresses factual grounding but does not target structural distortion under high rhetorical fluency
+\\
+
+Selective Prediction / Abstention~\cite{geifman2017selective}
+&
+Confidence thresholding
+&
+Self-evaluating model
+&
+Internal uncertainty
+&
+Abstention typically treated as uncertainty handling
+&
+No (model-dependent)
+&
+Relies on the model's own self-report
+\\
+
+Constitutional AI~\cite{bai2022constitutional}
+&
+Constitutional principles in training
+&
+Self-regulating model
+&
+Alignment during training
+&
+Internal correction
+&
+No
+&
+Focuses on internal correction rather than external routing
+\\
+
+LLM Guardrails (e.g., NeMo Guardrails~\cite{rebedea2023nemo}, Guardrails AI)
+&
+Rule-based input/output filters
+&
+Constrained generator
+&
+Policy violations
+&
+Block / redact
+&
+Partial
+&
+May still include semantic or model-dependent evaluation components
+\\
+
+Multi-Agent Debate~\cite{du2023improving}
+&
+Multiple LLMs cross-validating
+&
+Collaborative agents
+&
+Disagreement as signal
+&
+Consensus or majority
+&
+No
+&
+Reintroduces generative components into the evaluation loop
+\\
+
+LLM Verifiers~\cite{cobbe2021verifiers}
+&
+Step-by-step verification
+&
+Modular verification per component
+&
+Verifiable reasoning
+&
+Varies
+&
+Partial
+&
+Provides verifiable step-by-step reasoning; does not offer executable external routing with HOLD-as-Success
+\\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Halation as a distinct risk axis is one of the key differentiators of ReikaSystem.
+While most related frameworks primarily target hallucination as unsupported factual
+completion, ReikaSystem additionally formalizes a failure mode in which the output
+remains \emph{fluent, plausible, and locally coherent while being structurally wrong}
+(high RF / low GM imbalance). This type of structural distortion is not resolved by
+retrieval alone, nor by self-reported uncertainty, and therefore motivates externally
+computed routing and deterministic monitoring.
+
+ReikaSystem further treats abstention (\textsc{hold}) as a positive safety outcome
+rather than a failure state. Combined with Safety-First Gating and Layer~0 early-exit,
+this provides a deterministic, auditable control loop that existing guardrail or
+selective-prediction systems do not offer.
+
+In summary, ReikaSystem is not another internal alignment or guardrail technique.
+It is an external, Empty-Set-compliant control architecture that relocates all decision
+authority outside the untrusted LLM. This design choice aligns with recent theoretical
+and empirical findings that hallucination and surface-plausible structural failure are
+not fully addressable through internal model correction alone.
 
 %% ============================================================
 \section{Limitations and future work}
+\label{sec:limitations}
 
 \textbf{Kernel specification scope.}
 The kernel specification is intended for human operators, not for direct LLM ingestion.
@@ -794,7 +1253,7 @@ In \textit{ACL}, 2025.
 
 \bibitem{chandra2025sycophancy}
 K. Chandra, M. Kleiman-Weiner, J. Ragan-Kelley, and J. B. Tenenbaum.
-Sycophantic chatbots cause delusional spiraling, even in ideal {B}ayesians.
+Sycophantic chatbots cause delusional spiraling, even in ideal Bayesians.
 \textit{arXiv preprint}, 2025.
 
 \bibitem{ren2026mask}
@@ -804,8 +1263,9 @@ D. Lee, S. Yue, and D. Hendrycks.
 The {MASK} benchmark: Disentangling honesty from accuracy in {AI} systems.
 \textit{arXiv preprint}, 2026.
 
-\bibitem{guo2026mirage}
-M. Asadi, J. W. O'Sullivan, F. Cao, T. Nedaee, K. Fardi, F. Li, E. Adeli, and E. Ashley.
+\bibitem{asadi2026mirage}
+M. Asadi, J. W. O'Sullivan, F. Cao, T. Nedaee, K. Fardi, F. Li, E. Adeli,
+and E. Ashley.
 {MIRAGE}: The illusion of visual understanding.
 \textit{arXiv preprint arXiv:2603.21687}, 2026.
 
@@ -813,6 +1273,24 @@ M. Asadi, J. W. O'Sullivan, F. Cao, T. Nedaee, K. Fardi, F. Li, E. Adeli, and E.
 J. Evans, B. Bratton, and B. Ag\"{u}era y Arcas.
 Agentic {AI} and the next intelligence explosion.
 \textit{arXiv preprint arXiv:2603.20639}, 2026.
+
+\bibitem{lindsey2026emotions}
+J. Lindsey, W. Gurnee, E. Ameisen, B. Chen, A. Pearce, N.~L. Turner,
+C. Citro, C. Olah, et al.
+Emotion concepts and their function in a large language model.
+\textit{Transformer Circuits Thread}, 2026.
+Available at \url{https://transformer-circuits.pub/2026/emotions/index.html}.
+
+\bibitem{tran2026single}
+D. Tran and D. Kiela.
+Single-agent {LLMs} outperform multi-agent systems on multi-hop reasoning
+under equal thinking token budgets.
+\textit{arXiv preprint arXiv:2604.02460}, 2026.
+
+\bibitem{banerjee2024hallucinate}
+S. Banerjee, A. Agarwal, and S. Singla.
+{LLMs} will always hallucinate, and we need to live with this.
+\textit{arXiv preprint arXiv:2409.05746}, 2024.
 
 \end{thebibliography}
 
@@ -825,7 +1303,7 @@ Agentic {AI} and the next intelligence explosion.
 \Ensure $\text{Action} \in \{\textsc{output}(y),\,\textsc{retrieve},\,\textsc{clarify},\,\textsc{hold}\}$
 
 \State $y_t \leftarrow f(x_t)$ \Comment{Untrusted candidate generation}
-\State $\mathit{fp} \leftarrow \{\text{connective surge},\;\text{early assertiveness},\;\text{low entity density}\}$
+\State $\mathit{fp} \leftarrow \{\text{connective surge},\;\text{early assertiveness},\;\text{low entity density},\;\text{rhetorical template}\}$
 \If{$\mathrm{detectAnomaly}(\mathit{fp}) = \mathrm{True}$} \Comment{Layer 0 early-exit}
   \State \Return $\textsc{retrieve}$ \textbf{or} $\textsc{clarify}$
 \EndIf
